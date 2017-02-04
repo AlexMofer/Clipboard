@@ -14,7 +14,7 @@
 ```java
 dependencies {
     ⋯
-    compile 'am.widget:tagtabstrip:25.1.0'
+    compile 'am.widget:tagtabstrip:25.1.1'
     ⋯
 }
 ```
@@ -46,6 +46,7 @@ ttsTags.bindViewPager(viewpager);
 - 保持跟其他官方支持库版本一致（如：com.android.support:appcompat-v7），否则可能出现错误
 
 ## 历史
+- [**25.1.0**](https://bintray.com/alexmofer/maven/TagTabStrip/25.1.0)
 - [**25.0.1**](https://bintray.com/alexmofer/maven/TagTabStrip/25.0.1)
 - [**25.0.0**](https://bintray.com/alexmofer/maven/TagTabStrip/25.0.0)
 - [**24.2.1**](https://bintray.com/alexmofer/maven/TagTabStrip/24.2.1)

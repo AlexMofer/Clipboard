@@ -10,7 +10,7 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.Locale;
 
-import am.view.ViewsPagerAdapter;
+import am.util.viewpager.adapter.ViewsPagerAdapter;
 import am.widget.tagtabstrip.TagTabStrip;
 
 public class TagTabStripActivity extends BaseActivity {
