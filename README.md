@@ -14,7 +14,7 @@
 ```java
 dependencies {
     ⋯
-    compile 'am.widget:tagtabstrip:26.0.0-alpha1'
+    compile 'am.widget:tagtabstrip:26.0.0-beta1'
     ⋯
 }
 ```
@@ -47,6 +47,7 @@ ttsTags.bindViewPager(viewpager);
 
 ## 历史
 - [**25.4.0**](https://bintray.com/alexmofer/maven/TagTabStrip/25.4.0)
+- [**26.0.0-alpha1**](https://bintray.com/alexmofer/maven/TagTabStrip/26.0.0-alpha1)
 - [**25.3.1**](https://bintray.com/alexmofer/maven/TagTabStrip/25.3.1)
 - [**25.3.0**](https://bintray.com/alexmofer/maven/TagTabStrip/25.3.0)
 - [**25.2.0**](https://bintray.com/alexmofer/maven/TagTabStrip/25.2.0)
