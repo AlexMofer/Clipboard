@@ -7,14 +7,14 @@
 ## 预览
 ![Screenshots](https://raw.githubusercontent.com/AlexMofer/ProjectX/master/tagtabstrip/screenshots.gif)
 ## 要求
-- minSdkVersion 9
+- minSdkVersion 14
 - 保持跟其他官方支持库版本一致（如：com.android.support:appcompat-v7）
 
 ## 引用
 ```java
 dependencies {
     ⋯
-    compile 'am.widget:tagtabstrip:25.4.0'
+    compile 'am.widget:tagtabstrip:26.0.0-alpha1'
     ⋯
 }
 ```
@@ -46,6 +46,7 @@ ttsTags.bindViewPager(viewpager);
 - 保持跟其他官方支持库版本一致（如：com.android.support:appcompat-v7），否则可能出现错误
 
 ## 历史
+- [**25.4.0**](https://bintray.com/alexmofer/maven/TagTabStrip/25.4.0)
 - [**25.3.1**](https://bintray.com/alexmofer/maven/TagTabStrip/25.3.1)
 - [**25.3.0**](https://bintray.com/alexmofer/maven/TagTabStrip/25.3.0)
 - [**25.2.0**](https://bintray.com/alexmofer/maven/TagTabStrip/25.2.0)
