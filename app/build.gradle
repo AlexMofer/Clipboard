@@ -13,8 +13,8 @@ android {
 }
 
 dependencies {
-    compile 'com.android.support:appcompat-v7:26.0.0-beta2'
-    compile 'com.android.support:design:26.0.0-beta2'
-    compile 'am.util:viewpager:26.0.0-beta2'
+    compile 'com.android.support:appcompat-v7:26.0.0'
+    compile 'com.android.support:design:26.0.0'
+    compile 'am.util:viewpager:26.0.0'
     compile project(':tagtabstrip')
 }
