@@ -1,1 +1,1 @@
-include ':app', ':tagtabstrip'
+include ':app'

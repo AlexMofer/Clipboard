@@ -2,7 +2,6 @@ apply plugin: 'com.android.application'
 
 android {
     compileSdkVersion 26
-    buildToolsVersion "26.0.1"
     defaultConfig {
         applicationId "am.example.tagtabstrip"
         minSdkVersion 14
@@ -13,8 +12,8 @@ android {
 }
 
 dependencies {
-    compile 'com.android.support:appcompat-v7:26.0.2'
-    compile 'com.android.support:design:26.0.2'
-    compile 'am.util:viewpager:26.0.2'
-    compile project(':tagtabstrip')
+    implementation 'com.android.support:appcompat-v7:26.1.0'
+    implementation 'com.android.support:design:26.1.0'
+    implementation 'am.util:viewpager:26.1.0'
+    implementation 'am.widget:tagtabstrip:26.1.0'
 }
