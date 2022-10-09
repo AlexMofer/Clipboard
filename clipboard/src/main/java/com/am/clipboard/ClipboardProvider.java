@@ -1,133 +1,186 @@
 package com.am.clipboard;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.ContentProvider;
+import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.content.UriMatcher;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-import android.content.pm.ProviderInfo;
 import android.database.AbstractCursor;
 import android.database.Cursor;
 import android.net.Uri;
-import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.text.TextUtils;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 public class ClipboardProvider extends ContentProvider {
 
-    static final String PATH_COPY = "copy";
-    static final String PATH_CLEAR = "clear";
-    static final String PATH_CHECK = "check";
-    private static final int CODE_COPY = 1;
+    private static final String AUTHORITY = "com.am.clipboard.clipboardprovider";
+    private static final Uri URI_BASE = Uri.parse(ContentResolver.SCHEME_CONTENT + "://" + AUTHORITY);
+    private static final String PATH_ITEM = "item";
+    private static final String PATH_CLEAR = "clear";
+    private static final String PATH_DELETE = "delete";
+    private static final String PATH_CHECK = "check";
+    private static final String MODE_WRITE = "w";
+    private static final String MODE_READ = "r";
+    private static final int CODE_ITEM = 1;
     private static final int CODE_CLEAR = 2;
-    private static final int CODE_CHECK = 3;
-    private static final String META_DATA_CLIPBOARD_PROVIDER_PREFIX = "am.util.clipboard.CLIPBOARD_PROVIDER_PREFIX";
-    private static final String META_DATA_CLIPBOARD_PROVIDER_PREFERENCES = "am.util.clipboard.CLIPBOARD_PROVIDER_PREFERENCES";
-    private static final String META_DATA_CLIPBOARD_PROVIDER_PERMANENT = "am.util.clipboard.CLIPBOARD_PROVIDER_PERMANENT";
-    private static final String KEY_FILES = "files";
-    private static final String PREFIX = "clipboard_provider_data_";
-    private static final String PREFERENCES = "clipboard_provider_preferences";
-    private static String sAuthority;
+    private static final int CODE_DELETE = 3;
+    private static final int CODE_CHECK = 4;
     private final UriMatcher mMatcher = new UriMatcher(UriMatcher.NO_MATCH);
-    private final Set<String> mFiles = new HashSet<>();
-    private String mPrefix;
-    private boolean mPermanent;// 决定使用cache目录还是使用files目录
-    private SharedPreferences mBackup;
-    private ClipboardManager mManager;
+    private File mDirectory;// 剪切板文件夹
 
-    private static void checkAuthority(Context context) {
-        if (sAuthority != null)
-            return;
-        if (context == null)
-            return;
-        final PackageInfo info;
-        try {
-            info = context.getPackageManager()
-                    .getPackageInfo(context.getPackageName(), PackageManager.GET_PROVIDERS);
-        } catch (Exception e) {
-            return;
+    private static Uri getUri(String pathSegment) {
+        return Uri.withAppendedPath(URI_BASE, pathSegment);
+    }
+
+    static void delete(Context context, List<Uri> uris) {
+        final ArrayList<String> names = new ArrayList<>();
+        for (Uri uri : uris) {
+            final List<String> segments = uri.getPathSegments();
+            if (segments == null || segments.size() != 3 || !PATH_ITEM.equals(segments.get(0))) {
+                continue;
+            }
+            final String name = segments.get(2);
+            if (TextUtils.isEmpty(name)) {
+                continue;
+            }
+            names.add(name);
         }
-        if (info == null || info.providers == null)
-            return;
-        final ProviderInfo[] providers = info.providers;
-        final String name = ClipboardProvider.class.getName();
-        for (ProviderInfo provider : providers) {
-            if (TextUtils.equals(provider.name, name)) {
-                sAuthority = provider.authority;
-                break;
+        context.getContentResolver().delete(getUri(PATH_DELETE), null,
+                names.toArray(new String[0]));
+    }
+
+    static ArrayList<Uri> write(Context context, SuperClipboard.OutputAdapter adapter,
+                                Set<String> mimeTypes) {
+        if (context == null || adapter == null || mimeTypes == null) {
+            return new ArrayList<>();
+        }
+        final ContentResolver resolver = context.getContentResolver();
+        final int count = adapter.getCount();
+        if (count <= 0) {
+            return new ArrayList<>();
+        }
+        final ArrayList<Uri> uris = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            final String mimeType = adapter.getMimeType(i);
+            if (TextUtils.isEmpty(mimeType)) {
+                mimeTypes.clear();
+                return new ArrayList<>();
+            }
+            final String name = UUID.randomUUID().toString();
+            final Uri uri = getUri(PATH_ITEM + "/" + Uri.encode(mimeType) + "/" + name);
+            boolean success = false;
+            try (final ParcelFileDescriptor descriptor =
+                         resolver.openFileDescriptor(uri, MODE_WRITE)) {
+                success = adapter.write(i, descriptor);
+            } catch (Exception e) {
+                // do nothing
+                e.printStackTrace();
+            }
+            if (success) {
+                mimeTypes.add(mimeType);
+                uris.add(uri);
+            } else {
+                mimeTypes.clear();
+                return new ArrayList<>();
             }
         }
+        return uris;
     }
 
-    static String getAuthority(Context context) {
-        checkAuthority(context);
-        return sAuthority;
+    static void clear(Context context) {
+        context.getContentResolver().delete(getUri(PATH_CLEAR), null, null);
     }
 
-    protected String getAuthority() {
-        return sAuthority;
+    static boolean read(Context context, SuperClipboard.InputAdapter adapter, Uri uri) {
+        final List<String> segments = uri.getPathSegments();
+        if (segments == null || segments.size() != 3 || !PATH_ITEM.equals(segments.get(0))) {
+            return false;
+        }
+        final String mimeType = segments.get(1);
+        if (TextUtils.isEmpty(mimeType)) {
+            return false;
+        }
+        try (final ParcelFileDescriptor descriptor =
+                     context.getContentResolver().openFileDescriptor(uri, MODE_READ)) {
+            return adapter.read(mimeType, descriptor);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
-    static void setAuthority(String authority) {
-        sAuthority = authority;
+    static boolean check(Context context, String mimeType, Uri uri) {
+        final List<String> segments = uri.getPathSegments();
+        if (segments == null || segments.size() != 3 || !PATH_ITEM.equals(segments.get(0))) {
+            return false;
+        }
+        if (mimeType != null &&
+                !TextUtils.equals(mimeType, Uri.decode(segments.get(1)))) {
+            return false;
+        }
+        final Uri check = getUri(PATH_CHECK + "/" + segments.get(2));
+        try (final Cursor cursor = context.getContentResolver().query(check,
+                null, null, null, null)) {
+            if (cursor != null) {
+                boolean result = false;
+                if (cursor.moveToFirst()) {
+                    final byte[] blob = cursor.getBlob(0);
+                    result = blob != null && blob.length == 1 && blob[0] != 0;
+                }
+                return result;
+            }
+        }
+        return false;
     }
 
     @Override
     public boolean onCreate() {
-        final Context context = getContext();
-        checkAuthority(context);
-        final String authority = getAuthority();
-        if (TextUtils.isEmpty(authority))
-            return false;
-        String preferences = null;
-        final ProviderInfo info = context.getPackageManager()
-                .resolveContentProvider(authority, PackageManager.GET_META_DATA);
-        if (info != null && info.metaData != null) {
-            mPrefix = info.metaData.getString(META_DATA_CLIPBOARD_PROVIDER_PREFIX);
-            preferences = info.metaData.getString(META_DATA_CLIPBOARD_PROVIDER_PREFERENCES);
-            mPermanent = info.metaData.getBoolean(META_DATA_CLIPBOARD_PROVIDER_PERMANENT);
-        }
-        if (TextUtils.isEmpty(mPrefix)) {
-            mPrefix = PREFIX;
-        }
-        if (TextUtils.isEmpty(preferences)) {
-            preferences = PREFERENCES;
-        }
-        mMatcher.addURI(authority, PATH_COPY + "/*", CODE_COPY);
+        final String authority = AUTHORITY;
+        mMatcher.addURI(authority, PATH_ITEM + "/*/*", CODE_ITEM);
         mMatcher.addURI(authority, PATH_CLEAR, CODE_CLEAR);
-        mMatcher.addURI(authority, PATH_CHECK, CODE_CHECK);
-
-        mManager = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
-        mManager.addPrimaryClipChangedListener(this::check);
-
-        mBackup = context.getSharedPreferences(preferences, Context.MODE_PRIVATE);
-        final Set<String> files = mBackup.getStringSet(KEY_FILES, null);
-        if (files != null) {
-            mFiles.addAll(files);
+        mMatcher.addURI(authority, PATH_DELETE, CODE_DELETE);
+        mMatcher.addURI(authority, PATH_CHECK + "/*", CODE_CHECK);
+        mDirectory = getContext().getExternalFilesDir("SuperClipboard");
+        if (mDirectory == null) {
+            mDirectory = new File(getContext().getFilesDir(), "SuperClipboard");
         }
-        check();
+        //noinspection ResultOfMethodCallIgnored
+        mDirectory.mkdirs();
         return true;
     }
 
     @Override
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
                         String sortOrder) {
-        return mMatcher.match(uri) != CODE_CHECK ? new ClipboardCursor(!mFiles.isEmpty()) : null;
+        if (mMatcher.match(uri) != CODE_CHECK) {
+            return null;
+        }
+        final List<String> segments = uri.getPathSegments();
+        if (segments == null || segments.size() != 2 || !PATH_CHECK.equals(segments.get(0))) {
+            return null;
+        }
+        final String name = segments.get(1);
+        return new ClipboardCursor(mDirectory != null && new File(mDirectory, name).exists());
     }
 
     @Override
     public String getType(Uri uri) {
-        return null;
+        if (mMatcher.match(uri) != CODE_ITEM) {
+            return null;
+        }
+        final List<String> segments = uri.getPathSegments();
+        if (segments == null || segments.size() != 3 || !PATH_ITEM.equals(segments.get(0))) {
+            return null;
+        }
+        return Uri.decode(segments.get(1));
     }
 
     @Override
@@ -137,7 +190,26 @@ public class ClipboardProvider extends ContentProvider {
 
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
-        return mMatcher.match(uri) == CODE_CLEAR ? clear() : 0;
+        if (mDirectory == null) {
+            return 0;
+        }
+        if (mMatcher.match(uri) == CODE_CLEAR) {
+            return clear();
+        }
+        if (mMatcher.match(uri) == CODE_DELETE) {
+            final HashSet<String> names = new HashSet<>(Arrays.asList(selectionArgs));
+            final File[] children = mDirectory.listFiles((dir, name) -> !names.contains(name));
+            int count = 0;
+            if (children != null) {
+                for (File child : children) {
+                    if (FileHelper.delete(child)) {
+                        count++;
+                    }
+                }
+            }
+            return count;
+        }
+        return 0;
     }
 
     @Override
@@ -147,96 +219,38 @@ public class ClipboardProvider extends ContentProvider {
 
     @Override
     public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
-        if (mMatcher.match(uri) != CODE_COPY) {
-            return null;
+        if (mMatcher.match(uri) != CODE_ITEM) {
+            return super.openFile(uri, mode);
         }
-        final List<String> pss = uri.getPathSegments();
-        if (pss == null || pss.size() != 2 || !PATH_COPY.equals(pss.get(0))) {
-            return null;
+        if (mDirectory == null) {
+            throw new FileNotFoundException("Cannot get directory.");
         }
-        final String name = pss.get(1);
-        final int modeBits;
-        if ("r".equals(mode)) {
-            synchronized (mFiles) {
-                if (mFiles.contains(name)) {
-                    return ParcelFileDescriptor.open(getFile(name),
-                            ParcelFileDescriptor.MODE_READ_ONLY);
-                }
+        final List<String> segments = uri.getPathSegments();
+        if (segments == null || segments.size() != 3 || !PATH_ITEM.equals(segments.get(0))) {
+            throw new FileNotFoundException("Uri error at " + uri);
+        }
+        final String name = segments.get(2);
+        if (TextUtils.isEmpty(name)) {
+            throw new FileNotFoundException("Uri error at " + uri);
+        }
+        final File file = new File(mDirectory, name);
+        if (MODE_WRITE.equals(mode)) {
+            // 写入
+            return ParcelFileDescriptor.open(file,
+                    ParcelFileDescriptor.MODE_READ_WRITE | ParcelFileDescriptor.MODE_CREATE);
+        } else if (MODE_READ.equals(mode)) {
+            // 读取
+            if (file.exists()) {
+                return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
             }
             return null;
-        } else if ("w".equals(mode) || "wt".equals(mode)) {
-            modeBits = ParcelFileDescriptor.MODE_WRITE_ONLY
-                    | ParcelFileDescriptor.MODE_CREATE
-                    | ParcelFileDescriptor.MODE_TRUNCATE;
-        } else if ("wa".equals(mode)) {
-            modeBits = ParcelFileDescriptor.MODE_WRITE_ONLY
-                    | ParcelFileDescriptor.MODE_CREATE
-                    | ParcelFileDescriptor.MODE_APPEND;
-        } else if ("rw".equals(mode)) {
-            modeBits = ParcelFileDescriptor.MODE_READ_WRITE
-                    | ParcelFileDescriptor.MODE_CREATE;
-        } else if ("rwt".equals(mode)) {
-            modeBits = ParcelFileDescriptor.MODE_READ_WRITE
-                    | ParcelFileDescriptor.MODE_CREATE
-                    | ParcelFileDescriptor.MODE_TRUNCATE;
         } else {
-            return null;
+            throw new FileNotFoundException("Mode error at " + uri);
         }
-        synchronized (mFiles) {
-            mFiles.add(name);
-            mBackup.edit().putStringSet(KEY_FILES, mFiles).apply();
-        }
-        return ParcelFileDescriptor.open(getFile(name), modeBits);
-    }
-
-    private File getFile(String name) {
-        if (mPermanent) {
-            return getContext().getFileStreamPath(mPrefix + name);
-        }
-        return new File(getContext().getCacheDir(), mPrefix + name);
     }
 
     private int clear() {
-        synchronized (mFiles) {
-            mBackup.edit().remove(KEY_FILES).apply();
-            if (mFiles.isEmpty()) {
-                return 0;
-            }
-            for (String name : mFiles) {
-                //noinspection ResultOfMethodCallIgnored
-                getFile(name).delete();
-            }
-            final int size = mFiles.size();
-            mFiles.clear();
-            return size;
-        }
-    }
-
-    private void check() {
-        if (mManager.hasPrimaryClip()) {
-            final ClipData clip = mManager.getPrimaryClip();
-            if (clip != null && clip.getItemCount() > 0) {
-                Uri uri = null;
-                final int count = clip.getItemCount();
-                for (int i = 0; i < count; i++) {
-                    final ClipData.Item item = clip.getItemAt(i);
-                    final Uri u = item.getUri();
-                    if (u != null) {
-                        uri = u;
-                        break;
-                    }
-                }
-                if (uri != null && mMatcher.match(uri) == CODE_COPY) {
-                    return;
-                }
-            }
-            clear();
-        } else {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                // Android 10及以上，仅默认输入法或者应用已获取到焦点，否则无法访问剪切板。
-                clear();
-            }
-        }
+        return FileHelper.clearDirectory(mDirectory);
     }
 
     private static class ClipboardCursor extends AbstractCursor {

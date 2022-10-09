@@ -20,6 +20,7 @@ import android.os.ParcelFileDescriptor;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.util.ArrayList;
 
 /**
  * 序列化数据辅助器
@@ -30,58 +31,65 @@ class SerializableHelper {
         //no instance
     }
 
-    public static boolean write(ParcelFileDescriptor descriptor, Serializable serializable) {
-        final ObjectOutputStream output;
-        try {
-            output = new ObjectOutputStream(
-                    new ParcelFileDescriptor.AutoCloseOutputStream(descriptor));
-        } catch (Exception e) {
-            return false;
+    public static class SerializableOutputAdapter implements SuperClipboard.OutputAdapter {
+
+        private final String mMimeType;
+        private final String[] mMimeTypes;
+        private final Serializable[] mItems;
+
+        public SerializableOutputAdapter(String mimeType, Serializable... items) {
+            mMimeType = mimeType;
+            mMimeTypes = null;
+            mItems = items;
         }
-        try {
-            output.writeObject(serializable);
-        } catch (Exception e) {
-            try {
-                output.close();
-            } catch (Exception e1) {
-                // ignore
+
+        public SerializableOutputAdapter(String[] mimeTypes, Serializable[] items) {
+            mMimeType = null;
+            mMimeTypes = mimeTypes;
+            mItems = items;
+        }
+
+        @Override
+        public int getCount() {
+            return mItems.length;
+        }
+
+        @Override
+        public String getMimeType(int position) {
+            //noinspection ConstantConditions
+            return mMimeType != null ? mMimeType : mMimeTypes[position];
+        }
+
+        @Override
+        public boolean write(int position, ParcelFileDescriptor descriptor) {
+            final Serializable item = mItems[position];
+            try (final ObjectOutputStream output = new ObjectOutputStream(
+                    new ParcelFileDescriptor.AutoCloseOutputStream(descriptor))) {
+                output.writeObject(item);
+                return true;
+            } catch (Exception e) {
+                return false;
             }
-            return false;
         }
-        boolean finish = true;
-        try {
-            output.close();
-        } catch (Exception e1) {
-            finish = false;
-        }
-        return finish;
     }
 
-    public static Serializable read(ParcelFileDescriptor descriptor) {
-        final ObjectInputStream input;
-        try {
-            input = new ObjectInputStream(
-                    new ParcelFileDescriptor.AutoCloseInputStream(descriptor));
-        } catch (Exception e) {
-            return null;
-        }
-        final Serializable serializable;
-        try {
-            serializable = (Serializable) input.readObject();
-        } catch (Exception e) {
-            try {
-                input.close();
-            } catch (Exception e1) {
-                // ignore
+    public static class SerializableInputAdapter implements SuperClipboard.InputAdapter {
+
+        private final ArrayList<Serializable> mItems = new ArrayList<>();
+
+        @Override
+        public boolean read(String mimeType, ParcelFileDescriptor descriptor) {
+            try (final ObjectInputStream input = new ObjectInputStream(
+                    new ParcelFileDescriptor.AutoCloseInputStream(descriptor))) {
+                mItems.add((Serializable) input.readObject());
+                return true;
+            } catch (Exception e) {
+                return false;
             }
-            return null;
         }
-        boolean finish = true;
-        try {
-            input.close();
-        } catch (Exception e1) {
-            finish = false;
+
+        public ArrayList<Serializable> getItems() {
+            return mItems;
         }
-        return finish ? serializable : null;
     }
 }

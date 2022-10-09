@@ -20,388 +20,388 @@ import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.ContentResolver;
 import android.content.Context;
-import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
 
-import java.io.IOException;
+import java.io.File;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * 超级剪切板
  */
 public class SuperClipboard {
 
-    public static final String MIME_ITEM = "vnd.android.cursor.item";
-    public static final String MIME_DIR = "vnd.android.cursor.dir";
-    private static String sAuthority;
-    private static Uri sBase;
-
     private SuperClipboard() {
         //no instance
     }
 
+    private static ClipboardManager getClipboardManager(Context context) {
+        if (Build.VERSION.SDK_INT >= 23) {
+            return context.getSystemService(ClipboardManager.class);
+        } else {
+            return (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+        }
+    }
+
     /**
-     * 设置Authority
-     * ClipboardContentProvider能够自动获取，自定义的该子类需要重写getAuthority方法。
+     * 获取MIME，基础类型为游标子项
      *
-     * @param authority Authority
+     * @param subtype 子类型，如：vnd.clipboard.data
+     * @return 自定义MIME
      */
-    public static void setAuthority(String authority) {
-        ClipboardProvider.setAuthority(authority);
+    public static String getMime(String subtype) {
+        return ContentResolver.CURSOR_ITEM_BASE_TYPE + "/" + subtype;
     }
 
-    private static Uri getUri(Context context, String pathSegment) {
-        if (sBase == null) {
-            if (sAuthority == null) {
-                sAuthority = ClipboardProvider.getAuthority(context);
-            }
-            if (sAuthority != null) {
-                sBase = Uri.parse(ContentResolver.SCHEME_CONTENT + "://" + sAuthority);
+    private static void delete(Context context, ClipData excluded) {
+        final ArrayList<Uri> uris = new ArrayList<>();
+        if (excluded != null) {
+            final int count = excluded.getItemCount();
+            if (count > 0) {
+                for (int i = 0; i < count; i++) {
+                    final Uri uri = excluded.getItemAt(i).getUri();
+                    if (uri != null) {
+                        uris.add(uri);
+                    }
+                }
             }
         }
-        if (sBase == null) {
-            return null;
-        }
-        return Uri.withAppendedPath(sBase, pathSegment);
-    }
-
-    private static Uri getCopyUri(Context context) {
-        return getUri(context,
-                ClipboardProvider.PATH_COPY + "/" + UUID.randomUUID().toString());
+        ClipboardProvider.delete(context, uris);
     }
 
     /**
-     * 复制到剪切板
+     * 设置剪切板
      *
      * @param context Context
-     * @param type    MIME数据类型
-     * @param data    数据集
-     * @return 复制成功时返回true
+     * @param adapter 输出内容提供者
+     * @return 设置成功时返回true
      */
-    public static boolean copy(Context context, String type, Serializable... data) {
-        if (context == null || data == null || data.length <= 0) {
-            return false;
-        }
-        final ClipboardManager manager = (ClipboardManager)
-                context.getSystemService(Context.CLIPBOARD_SERVICE);
+    public static boolean setPrimaryClip(Context context, OutputAdapter adapter) {
+        final ClipboardManager manager = getClipboardManager(context);
         if (manager == null) {
             return false;
         }
-        try {
-            final Uri clear = getUri(context, ClipboardProvider.PATH_CLEAR);
-            if (clear != null) {
-                context.getContentResolver().delete(clear, null, null);
-            }
-        } catch (Exception e) {
-            // ignore
-        }
-        final Uri uri = copy(context, data[0]);
-        if (uri == null) {
+        final HashSet<String> mimeTypes = new HashSet<>();
+        final ArrayList<Uri> uris = ClipboardProvider.write(context, adapter, mimeTypes);
+        if (uris.isEmpty()) {
             return false;
         }
-        final ClipDescription description = new ClipDescription("URI", new String[]{type});
-        final ClipData clip = new ClipData(description, new ClipData.Item(uri));
-        final int count = data.length;
-        for (int i = 1; i < count; i++) {
-            final Uri u = copy(context, data[i]);
-            if (u == null) {
-                return false;
-            }
-            clip.addItem(new ClipData.Item(u));
+        final ClipDescription description = new ClipDescription("URI",
+                mimeTypes.toArray(new String[0]));
+        final ClipData data = new ClipData(description, new ClipData.Item(uris.get(0)));
+        final int size = uris.size();
+        for (int i = 1; i < size; i++) {
+            data.addItem(new ClipData.Item(uris.get(i)));
         }
-        manager.setPrimaryClip(clip);
+        delete(context, data);
+        manager.setPrimaryClip(data);
         return true;
     }
 
     /**
-     * 复制到剪切板
+     * 设置剪切板
      *
-     * @param context Context
-     * @param adapter 文件剪切板内容提供者
-     * @return 复制成功时返回true
+     * @param context  Context
+     * @param mimeType MIME类型
+     * @param items    子项
+     * @return 设置成功时返回true
      */
-    public static boolean copy(Context context, FileClipboardAdapter<?> adapter) {
-        if (context == null || adapter == null || adapter.getCount() <= 0) {
-            return false;
-        }
-        final ClipboardManager manager = (ClipboardManager)
-                context.getSystemService(Context.CLIPBOARD_SERVICE);
-        if (manager == null) {
-            return false;
-        }
-        try {
-            final Uri clear = getUri(context, ClipboardProvider.PATH_CLEAR);
-            if (clear != null) {
-                context.getContentResolver().delete(clear, null, null);
-            }
-        } catch (Exception e) {
-            // ignore
-        }
-        final Uri uri = copy(context, adapter, 0);
-        if (uri == null) {
-            return false;
-        }
-        final ClipDescription description = new ClipDescription("URI", adapter.getTypes());
-        final ClipData clip = new ClipData(description, new ClipData.Item(uri));
-        final int count = adapter.getCount();
-        for (int i = 1; i < count; i++) {
-            final Uri u = copy(context, adapter, i);
-            if (u == null) {
-                return false;
-            }
-            clip.addItem(new ClipData.Item(u));
-        }
-        manager.setPrimaryClip(clip);
-        return true;
-    }
-
-    private static ParcelFileDescriptor openFileDescriptor(Context context, Uri uri, String mode) {
-        final ParcelFileDescriptor descriptor;
-        try {
-            descriptor = context.getContentResolver().openFileDescriptor(uri, mode);
-        } catch (Exception e) {
-            return null;
-        }
-        return descriptor;
-    }
-
-    private static Uri copy(Context context, Serializable data) {
-        final Uri uri = getCopyUri(context);
-        if (uri == null) {
-            return null;
-        }
-        final ParcelFileDescriptor descriptor = openFileDescriptor(context, uri, "rwt");
-        if (descriptor == null) {
-            return null;
-        }
-        final boolean wrote = SerializableHelper.write(descriptor, data);
-        try {
-            descriptor.close();
-        } catch (IOException e) {
-            // ignore
-        }
-        return wrote ? uri : null;
-    }
-
-    private static Uri copy(Context context, FileClipboardAdapter<?> adapter, int position) {
-        final Uri uri = getCopyUri(context);
-        if (uri == null) {
-            return null;
-        }
-        final ParcelFileDescriptor descriptor = openFileDescriptor(context, uri, "rwt");
-        if (descriptor == null) {
-            return null;
-        }
-        final boolean wrote = adapter.write(position, descriptor);
-        try {
-            descriptor.close();
-        } catch (IOException e) {
-            // ignore
-        }
-        return wrote ? uri : null;
+    public static boolean setPrimaryClip(Context context,
+                                         String mimeType, Serializable... items) {
+        return items != null && items.length > 0 && setPrimaryClip(context,
+                new SerializableHelper.SerializableOutputAdapter(mimeType, items));
     }
 
     /**
-     * 判断剪切板是否包含该类型数据
+     * 设置剪切板
+     *
+     * @param context   Context
+     * @param mimeTypes MIME类型集合
+     * @param items     子项集合
+     * @return 设置成功时返回true
+     */
+    public static boolean setPrimaryClip(Context context,
+                                         String[] mimeTypes, Serializable[] items) {
+        return mimeTypes != null && items != null &&
+                mimeTypes.length == items.length && setPrimaryClip(context,
+                new SerializableHelper.SerializableOutputAdapter(mimeTypes, items));
+    }
+
+    /**
+     * 设置剪切板
+     *
+     * @param context  Context
+     * @param mimeType MIME类型
+     * @param files    文件
+     * @return 设置成功时返回true
+     */
+    public static boolean setPrimaryClip(Context context, String mimeType, File... files) {
+        return files != null && files.length > 0 && setPrimaryClip(context,
+                new FileHelper.FileOutputAdapter(mimeType, files));
+    }
+
+    /**
+     * 设置剪切板
+     *
+     * @param context   Context
+     * @param mimeTypes MIME类型集合
+     * @param files     文件合集
+     * @return 设置成功时返回true
+     */
+    public static boolean setPrimaryClip(Context context,
+                                         String[] mimeTypes, File[] files) {
+        return mimeTypes != null && files != null &&
+                mimeTypes.length == files.length && setPrimaryClip(context,
+                new FileHelper.FileOutputAdapter(mimeTypes, files));
+    }
+
+    /**
+     * 清空剪切板
      *
      * @param context Context
-     * @param type    类型
-     * @return 包含该类型数据时返回true
+     * @return 清空成功时返回true
      */
-    public static boolean contains(Context context, String type) {
-        final ClipboardManager manager = (ClipboardManager)
-                context.getSystemService(Context.CLIPBOARD_SERVICE);
+    public static boolean clearPrimaryClip(Context context) {
+        final ClipboardManager manager = getClipboardManager(context);
+        if (manager == null) {
+            return false;
+        }
+        ClipboardProvider.clear(context);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            manager.clearPrimaryClip();
+        } else {
+            manager.setPrimaryClip(ClipData.newPlainText("TEXT", ""));
+        }
+        return true;
+    }
+
+    /**
+     * 获取剪切板数据
+     *
+     * @param context Context
+     * @param adapter 输入内容提供者
+     * @return 获取成功时返回true
+     */
+    public static boolean getPrimaryClip(Context context, InputAdapter adapter) {
+        final ClipboardManager manager = getClipboardManager(context);
         if (manager == null || !manager.hasPrimaryClip()) {
             return false;
         }
-        final ClipData clip = manager.getPrimaryClip();
-        if (clip == null) {
+        final ClipData data = manager.getPrimaryClip();
+        if (data == null) {
             return false;
         }
-        return clip.getDescription().hasMimeType(type);
+        final int count = data.getItemCount();
+        if (count <= 0) {
+            return false;
+        }
+        for (int i = 0; i < count; i++) {
+            final Uri uri = data.getItemAt(i).getUri();
+            if (uri == null) {
+                // 该情况不应该出现
+                return false;
+            }
+            if (!ClipboardProvider.read(context, adapter, uri)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
-     * 获取全部剪切板序列化数据
+     * 获取剪切板序列化数据
      *
      * @param context Context
      * @return 序列化数据
      */
-    public static Serializable getClipData(Context context) {
-        final ClipboardManager manager = (ClipboardManager)
-                context.getSystemService(Context.CLIPBOARD_SERVICE);
-        if (manager == null || !manager.hasPrimaryClip()) {
-            return null;
-        }
-        final ClipData clip = manager.getPrimaryClip();
-        if (clip == null || clip.getItemCount() <= 0) {
-            return null;
-        }
-        Uri uri = null;
-        final int count = clip.getItemCount();
-        for (int i = 0; i < count; i++) {
-            final ClipData.Item item = clip.getItemAt(i);
-            final Uri u = item.getUri();
-            if (u != null) {
-                uri = u;
-                break;
+    public static <T extends Serializable> T getPrimaryClipSerializable(Context context) {
+        final SerializableHelper.SerializableInputAdapter input =
+                new SerializableHelper.SerializableInputAdapter();
+        if (getPrimaryClip(context, input)) {
+            final ArrayList<Serializable> items = input.getItems();
+            if (!items.isEmpty()) {
+                //noinspection unchecked
+                return (T) items.get(0);
             }
         }
-        if (uri == null) {
-            return null;
-        }
-        final ParcelFileDescriptor descriptor = openFileDescriptor(context, uri, "r");
-        if (descriptor == null) {
-            return null;
-        }
-        final Serializable data = SerializableHelper.read(descriptor);
-        try {
-            descriptor.close();
-        } catch (IOException e) {
-            // ignore
-        }
-        return data;
+        return null;
     }
 
     /**
-     * 获取全部剪切板序列化数据集
+     * 获取剪切板序列化数据集
      *
      * @param context Context
-     * @return 序列化数据集
+     * @return 序列化数据集，结果可能为空
      */
-    public static List<Serializable> getAllClipData(Context context) {
-        final ClipboardManager manager = (ClipboardManager)
-                context.getSystemService(Context.CLIPBOARD_SERVICE);
-        if (manager == null || !manager.hasPrimaryClip()) {
-            return null;
-        }
-        final ClipData clip = manager.getPrimaryClip();
-        if (clip == null || clip.getItemCount() <= 0) {
-            return null;
-        }
-        final ArrayList<Serializable> items = new ArrayList<>();
-        final int count = clip.getItemCount();
-        for (int i = 0; i < count; i++) {
-            final ClipData.Item item = clip.getItemAt(i);
-            final Uri uri = item.getUri();
-            if (uri != null) {
-                final ParcelFileDescriptor descriptor = openFileDescriptor(context, uri, "r");
-                if (descriptor != null) {
-                    final Serializable data = SerializableHelper.read(descriptor);
-                    try {
-                        descriptor.close();
-                    } catch (IOException e) {
-                        // ignore
-                    }
-                    if (data != null) {
-                        items.add(data);
-                    }
-                }
+    public static <T extends Serializable> List<T> getPrimaryClipSerializables(Context context) {
+        final SerializableHelper.SerializableInputAdapter input =
+                new SerializableHelper.SerializableInputAdapter();
+        if (getPrimaryClip(context, input)) {
+            final ArrayList<Serializable> items = input.getItems();
+            if (!items.isEmpty()) {
+                //noinspection unchecked
+                return (List<T>) items;
             }
         }
-        return items.isEmpty() ? null : items;
+        return null;
     }
 
     /**
-     * 获取所有剪切板数据
+     * 获取剪切板文件数据
      *
      * @param context Context
-     * @param adapter FileClipboardAdapter
-     * @param <T>     类型
-     * @return 数据集
+     * @param file    用于写入的文件
+     * @return 获取成功时返回true
      */
-    public static <T> List<T> getAllClipData(Context context, FileClipboardAdapter<T> adapter) {
-        final ClipboardManager manager = (ClipboardManager)
-                context.getSystemService(Context.CLIPBOARD_SERVICE);
-        if (manager == null || !manager.hasPrimaryClip()) {
-            return null;
-        }
-        final ClipData clip = manager.getPrimaryClip();
-        if (clip == null || clip.getItemCount() <= 0) {
-            return null;
-        }
-        final ArrayList<T> items = new ArrayList<>();
-        final int count = clip.getItemCount();
-        for (int i = 0; i < count; i++) {
-            final ClipData.Item item = clip.getItemAt(i);
-            final Uri uri = item.getUri();
-            if (uri != null) {
-                final ParcelFileDescriptor descriptor = openFileDescriptor(context, uri, "r");
-                if (descriptor != null) {
-                    final T data = adapter.read(descriptor);
-                    try {
-                        descriptor.close();
-                    } catch (IOException e) {
-                        // ignore
-                    }
-                    if (data != null) {
-                        items.add(data);
-                    }
-                }
-            }
-        }
-        return items.isEmpty() ? null : items;
+    public static boolean getPrimaryClipFile(Context context, File file) {
+        return getPrimaryClip(context, new FileHelper.FileInputAdapter(file));
     }
 
     /**
-     * 清除剪切板
+     * 获取剪切板文件集
      *
-     * @param context Context
-     * @return 是否清楚成功
+     * @param context   Context
+     * @param directory 用于写入的目录
+     * @return 文件集，结果可能为空
      */
-    public static boolean clear(Context context) {
-        try {
-            final Uri clear = getUri(context, ClipboardProvider.PATH_CLEAR);
-            if (clear != null) {
-                context.getContentResolver().delete(clear, null, null);
+    public static List<File> getPrimaryClipFiles(Context context, File directory) {
+        final FileHelper.DirectoryInputAdapter input =
+                new FileHelper.DirectoryInputAdapter(directory);
+        if (getPrimaryClip(context, input)) {
+            final ArrayList<File> items = input.getItems();
+            if (!items.isEmpty()) {
+                return items;
             }
-        } catch (Exception e) {
+        }
+        return null;
+    }
+
+
+    /**
+     * 判断剪切板是否包含该类型数据
+     *
+     * @param context   Context
+     * @param mimeType  MIME类型
+     * @param checkData 是否检查数据
+     * @return 包含该类型数据时返回true
+     */
+    public static boolean contains(Context context, String mimeType, boolean checkData) {
+        final ClipboardManager manager = getClipboardManager(context);
+        if (manager == null || !manager.hasPrimaryClip()) {
             return false;
         }
-        final ClipboardManager manager = (ClipboardManager)
-                context.getSystemService(Context.CLIPBOARD_SERVICE);
-        if (manager != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                manager.clearPrimaryClip();
-            } else {
-                manager.setPrimaryClip(ClipData.newPlainText("TEXT", ""));
+        final ClipData data = manager.getPrimaryClip();
+        if (data == null) {
+            return false;
+        }
+        if (!checkData) {
+            return data.getDescription().hasMimeType(mimeType);
+        }
+        if (!data.getDescription().hasMimeType(mimeType)) {
+            return false;
+        }
+        final int count = data.getItemCount();
+        if (count <= 0) {
+            return false;
+        }
+        boolean success = false;
+        for (int i = 0; i < count; i++) {
+            final Uri uri = data.getItemAt(i).getUri();
+            if (uri == null) {
+                // 该情况不应该出现
+                return false;
+            }
+            if (ClipboardProvider.check(context, mimeType, uri)) {
+                success = true;
             }
         }
-        return true;
+        return success;
     }
 
     /**
-     * 判断是否已复制
-     * 检查的是ClipboardContentProvider，而非ClipboardManager
+     * 检查剪切板
+     * 清除不在剪切板内的数据
      *
      * @param context Context
-     * @return 已复制内容时返回true
      */
-    public static boolean isCopied(Context context) {
-        try {
-            final Uri check = getUri(context, ClipboardProvider.PATH_CHECK);
-            if (check != null) {
-                final Cursor cursor =
-                        context.getContentResolver().query(check, null, null,
-                                null, null);
-                if (cursor != null) {
-                    boolean result = false;
-                    if (cursor.moveToFirst()) {
-                        final byte[] blob = cursor.getBlob(0);
-                        result = blob != null && blob.length == 1 && blob[0] != 0;
-                    }
-                    cursor.close();
-                    return result;
-                }
-            }
-        } catch (Exception e) {
-            // ignore
+    public static void check(Context context) {
+        final ClipboardManager manager = getClipboardManager(context);
+        if (manager == null) {
+            ClipboardProvider.clear(context);
+            return;
         }
-        return false;
+        if (!manager.hasPrimaryClip()) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                // Android 10及以上，仅默认输入法或者应用已获取到焦点，否则无法访问剪切板。
+                ClipboardProvider.clear(context);
+            }
+            return;
+        }
+        final ClipData data = manager.getPrimaryClip();
+        if (data == null) {
+            ClipboardProvider.clear(context);
+            return;
+        }
+        final int count = data.getItemCount();
+        if (count <= 0) {
+            return;
+        }
+        for (int i = 0; i < count; i++) {
+            final Uri uri = data.getItemAt(i).getUri();
+            if (uri != null && ClipboardProvider.check(context, null, uri)) {
+                continue;
+            }
+            ClipboardProvider.clear(context);
+            return;
+        }
+    }
+
+    /**
+     * 输出内容提供者
+     */
+    public interface OutputAdapter {
+
+        /**
+         * 获取总数
+         *
+         * @return 总数
+         */
+        int getCount();
+
+        /**
+         * 获取MIME类型
+         *
+         * @param position 位置
+         * @return MIME类型
+         */
+        String getMimeType(int position);
+
+        /**
+         * 写入
+         *
+         * @param position   位置
+         * @param descriptor 文件
+         * @return 是否成功
+         */
+        boolean write(int position, ParcelFileDescriptor descriptor);
+    }
+
+    /**
+     * 输入内容提供者
+     */
+    public interface InputAdapter {
+
+        /**
+         * 读取
+         *
+         * @param mimeType   MIME类型
+         * @param descriptor 文件
+         * @return 读取成功时返回true
+         */
+        boolean read(String mimeType, ParcelFileDescriptor descriptor);
     }
 }
