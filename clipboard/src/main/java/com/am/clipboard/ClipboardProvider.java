@@ -5,6 +5,9 @@ import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.UriMatcher;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ProviderInfo;
 import android.database.AbstractCursor;
 import android.database.Cursor;
 import android.net.Uri;
@@ -22,8 +25,6 @@ import java.util.UUID;
 
 public class ClipboardProvider extends ContentProvider {
 
-    private static final String AUTHORITY = "com.am.clipboard.clipboardprovider";
-    private static final Uri URI_BASE = Uri.parse(ContentResolver.SCHEME_CONTENT + "://" + AUTHORITY);
     private static final String PATH_ITEM = "item";
     private static final String PATH_CLEAR = "clear";
     private static final String PATH_DELETE = "delete";
@@ -34,11 +35,44 @@ public class ClipboardProvider extends ContentProvider {
     private static final int CODE_CLEAR = 2;
     private static final int CODE_DELETE = 3;
     private static final int CODE_CHECK = 4;
+    private static String sAuthority;
+    private static Uri sUri;
     private final UriMatcher mMatcher = new UriMatcher(UriMatcher.NO_MATCH);
     private File mDirectory;// 剪切板文件夹
 
-    private static Uri getUri(String pathSegment) {
-        return Uri.withAppendedPath(URI_BASE, pathSegment);
+    private static String getAuthority(Context context) {
+        if (sAuthority == null) {
+            final PackageInfo info;
+            try {
+                info = context.getPackageManager()
+                        .getPackageInfo(context.getPackageName(), PackageManager.GET_PROVIDERS);
+                if (info != null && info.providers != null) {
+                    final ProviderInfo[] providers = info.providers;
+                    final String name = ClipboardProvider.class.getName();
+                    for (ProviderInfo provider : providers) {
+                        if (TextUtils.equals(provider.name, name)) {
+                            sAuthority = provider.authority;
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // ignore
+            }
+
+        }
+        return sAuthority;
+    }
+
+    private static Uri getUri(Context context, String pathSegment) {
+        if (sUri == null) {
+            final String authority = getAuthority(context);
+            if (TextUtils.isEmpty(authority)) {
+                throw new IllegalArgumentException("Can not get authority.");
+            }
+            sUri = Uri.parse(ContentResolver.SCHEME_CONTENT + "://" + authority);
+        }
+        return Uri.withAppendedPath(sUri, pathSegment);
     }
 
     static void delete(Context context, List<Uri> uris) {
@@ -54,7 +88,7 @@ public class ClipboardProvider extends ContentProvider {
             }
             names.add(name);
         }
-        context.getContentResolver().delete(getUri(PATH_DELETE), null,
+        context.getContentResolver().delete(getUri(context, PATH_DELETE), null,
                 names.toArray(new String[0]));
     }
 
@@ -76,7 +110,8 @@ public class ClipboardProvider extends ContentProvider {
                 return new ArrayList<>();
             }
             final String name = UUID.randomUUID().toString();
-            final Uri uri = getUri(PATH_ITEM + "/" + Uri.encode(mimeType) + "/" + name);
+            final Uri uri = getUri(context,
+                    PATH_ITEM + "/" + Uri.encode(mimeType) + "/" + name);
             boolean success = false;
             try (final ParcelFileDescriptor descriptor =
                          resolver.openFileDescriptor(uri, MODE_WRITE)) {
@@ -97,7 +132,8 @@ public class ClipboardProvider extends ContentProvider {
     }
 
     static void clear(Context context) {
-        context.getContentResolver().delete(getUri(PATH_CLEAR), null, null);
+        context.getContentResolver().delete(getUri(context, PATH_CLEAR),
+                null, null);
     }
 
     static boolean read(Context context, SuperClipboard.InputAdapter adapter, Uri uri) {
@@ -126,7 +162,7 @@ public class ClipboardProvider extends ContentProvider {
                 !TextUtils.equals(mimeType, Uri.decode(segments.get(1)))) {
             return false;
         }
-        final Uri check = getUri(PATH_CHECK + "/" + segments.get(2));
+        final Uri check = getUri(context, PATH_CHECK + "/" + segments.get(2));
         try (final Cursor cursor = context.getContentResolver().query(check,
                 null, null, null, null)) {
             if (cursor != null) {
@@ -143,7 +179,10 @@ public class ClipboardProvider extends ContentProvider {
 
     @Override
     public boolean onCreate() {
-        final String authority = AUTHORITY;
+        final String authority = getAuthority(getContext());
+        if (TextUtils.isEmpty(authority)) {
+            return false;
+        }
         mMatcher.addURI(authority, PATH_ITEM + "/*/*", CODE_ITEM);
         mMatcher.addURI(authority, PATH_CLEAR, CODE_CLEAR);
         mMatcher.addURI(authority, PATH_DELETE, CODE_DELETE);

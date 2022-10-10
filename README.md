@@ -13,7 +13,7 @@ Clipboard
 ```
 dependencies {
     ...
-    implementation 'io.github.alexmofer.clipboard:clipboard:3.0.0'
+    implementation 'io.github.alexmofer.clipboard:clipboard:3.0.1'
     ...
 }
 ```
